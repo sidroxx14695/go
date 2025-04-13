@@ -1,0 +1,159 @@
+"""
+Apollo FieldSet definition
+"""
+scalar _FieldSet
+
+"""
+GraphQL Entity Implementation Key
+"""
+directive @key(fields: _FieldSet!) on OBJECT | INTERFACE
+
+"""
+Custom Policy Directive - Now Works on Fields Too!
+"""
+directive @policy(policies: [[Policy]]) on FIELD_DEFINITION | OBJECT
+
+"""
+DPI - Required Scopes
+"""
+directive @dpi_requiredScopes(scopes: [[String!]]!) on FIELD_DEFINITION | OBJECT
+
+"""
+DPI - Standardized Attribute
+"""
+directive @dpi_standardizedAttribute(standardizedAttributeVersionId: String!) on FIELD_DEFINITION | OBJECT
+
+"""
+DPI - Data Entity
+"""
+directive @dpi_dataEntity(dataEntityVersionId: String!) on FIELD_DEFINITION | OBJECT
+
+"""
+DPI - Resolver Generation
+"""
+directive @dpi_remote(path: String!) on FIELD_DEFINITION | OBJECT
+directive @dpi_dataSource(name: String!) on FIELD_DEFINITION | OBJECT
+directive @dpi_require(fieldName: String!) on FIELD_DEFINITION | OBJECT
+
+extend type Query {
+  getCustomer(customerReferenceId: String!): Customer @policy(policies:[[ 
+    {
+      key: "Query.getCustomer"
+    }
+  ]])
+
+  getAccount(accountReferenceId: String!): Account @policy(policies:[[ 
+    {
+      key: "Query.getAccount",
+      arguments: {
+        entitlementIdentifier: "accountReferenceId"
+      },
+      node: {
+        entitlementIdentifier: "accountReferenceId"
+      }
+    }
+  ]])
+
+  getAccounts: [Account] @policy(policies:[[ 
+    {
+      key: "Query.getAccounts",
+      node: {
+        entitlementIdentifier: "accountReferenceId"
+      }
+    }
+  ]])
+
+  getCard(cardReferenceId: String!): Card @policy(policies:[[ 
+    {
+      key: "Query.getCard",
+      arguments: {
+        entitlementIdentifier: "cardReferenceId"
+      },
+      node: {
+        entitlementIdentifier: "cardReferenceId"
+      }
+    }
+  ]])
+
+  getCards: [Card] @policy(policies:[[ 
+    {
+      key: "Query.getCards",
+      node: {
+        entitlementIdentifier: "cardReferenceId"
+      }
+    }
+  ]])
+}
+
+extend type Customer @key(fields: "customerReferenceId") {
+  customerReferenceId: String!
+  name: String!
+  last4ssn: String!
+  email: String!
+  address: String!
+  accounts: [Account] @policy(policies:[[ 
+    {
+      key: "Customer.accounts",
+      arguments: {
+        entitlementIdentifier: "accountReferenceId"
+      },
+      node: {
+        entitlementIdentifier: "accountReferenceId"
+      }
+    }
+  ]])
+}
+
+extend type Account @key(fields: "accountReferenceId") {
+  accountReferenceId: String!
+  status: String
+  type: String
+  balance: Float @policy(policies:[[ 
+    {
+      key: "Account.balance"
+    }
+  ]])
+  availableCreditAmount: AvailableCreditAmount
+  cards: [Card] @policy(policies:[[ 
+    {
+      key: "Account.cards",
+      arguments: {
+        entitlementIdentifier: "accountReferenceId"
+      },
+      node: {
+        entitlementIdentifier: "accountReferenceId"
+      }
+    }
+  ]])
+}
+
+extend type Card @key(fields: "cardReferenceId") {
+  cardReferenceId: String!
+  status: String
+  type: String
+  cardNumber: String @policy(policies:[[ 
+    {
+      key: "Card.cardNumber"
+    }
+  ]])
+  expiryDate: String
+  availableCreditAmount: AvailableCreditAmount
+}
+
+type AvailableCreditAmount {
+  availableSpendingCreditAmount: Float @policy(policies:[[ 
+    {
+      key: "AvailableCreditAmount.availableSpendingCreditAmount"
+    }
+  ]])
+  availableCashCreditAmount: Float
+}
+
+# Define the Policy Input Type
+input Policy {
+  key: String!
+  arguments: JSON
+  node: JSON
+}
+
+scalar JSON
