@@ -12,7 +12,7 @@ type TypeMap map[string]map[string]string
 type FieldsMap map[string]string
 
 func ParseSchema() (TypeMap, FieldsMap, error) {
-	schemaFilePath := "/Users/sharathnavva/Documents/Go/Post enforcement/schema.graphql"
+	schemaFilePath := "../schema.graphql"
 	body, err := os.ReadFile(schemaFilePath)
 	if err != nil {
 		return nil, nil, err
