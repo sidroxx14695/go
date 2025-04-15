@@ -7,22 +7,19 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 )
 
-type TypeMap map[string]map[string]string
-
 type FieldsMap map[string]string
 
-func ParseSchema() (TypeMap, FieldsMap, error) {
+func ParseSchema() (FieldsMap, error) {
 	schemaFilePath := "../schema.graphql"
 	body, err := os.ReadFile(schemaFilePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	doc, err := gqlparser.LoadSchema(&ast.Source{Input: string(body)})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	types := make(TypeMap)
 	allFieldMap := make(FieldsMap)
 	for typeName, def := range doc.Types {
 		if validateString(typeName) && len(def.Fields) > 0 {
@@ -33,8 +30,7 @@ func ParseSchema() (TypeMap, FieldsMap, error) {
 					allFieldMap[field.Name] = field.Type.String()
 				}
 			}
-			types[typeName] = fieldMap
 		}
 	}
-	return types, allFieldMap, nil
+	return allFieldMap, nil
 }

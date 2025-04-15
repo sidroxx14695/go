@@ -11,8 +11,6 @@ import (
 	"net/http"
 )
 
-type TypeMap map[string]map[string]string
-
 type JSONMap map[string]any
 
 func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +32,7 @@ func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, allFieldMap, err := utility.ParseSchema()
+	allFieldMap, err := utility.ParseSchema()
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error parsing schema: "+err.Error())
 		return
@@ -116,17 +114,14 @@ func normalizeTypeName(name string) string {
 
 func traverseAndRedact(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]bool, typename string) map[string]interface{} {
 	for key, value := range jsonMap {
-		if typename == "" {
-			if fieldType, ok := fieldMap[key]; ok {
-				typename = fieldType
+
+		if typename != "" {
+			normalizedType := normalizeTypeName(typename)
+
+			if policyMap[normalizedType] != nil && policyMap[normalizedType][key] {
+				delete(jsonMap, key)
+				continue
 			}
-		}
-
-		normalizedType := normalizeTypeName(typename)
-
-		if normalizedType != "" && policyMap[normalizedType] != nil && policyMap[normalizedType][key] {
-			delete(jsonMap, key)
-			continue
 		}
 
 		switch v := value.(type) {
