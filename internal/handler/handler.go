@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"regexp"
 	"strings"
@@ -51,7 +52,7 @@ func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policyMap := make(map[string]map[string]bool)
+	policyMap := make(map[string]map[string]any)
 	for _, policy := range policiesList {
 		parts := splitPoliciesAndRemoveSpace(policy, ".")
 		if len(parts) != 2 {
@@ -68,31 +69,27 @@ func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// var deleteKey string
-		// for key, value := range allFieldMap {
-		// 	if value == typename {
-		// 		deleteKey = key
-		// 		break
-		// 	}
-		// }
-		// if deleteKey == "" {
-		// 	respondWithError(w, http.StatusBadRequest, "No matching type found for policy: "+typename)
-		// 	return
-		// }
-
 		if policyMap[typename] == nil {
-			policyMap[typename] = make(map[string]bool)
+			policyMap[typename] = make(map[string]any)
 		}
+
+		engineResponse, error := getEngineResponseBasedOnPolicy(policy)
+		if error != nil {
+			respondWithError(w, http.StatusBadRequest, "Error getting engine response: "+error.Error())
+			return
+		}
+		policyMap[typename]["engineResonse"] = engineResponse
 		policyMap[typename][field] = true
 	}
 
-	data = traverseAndRedact(data, allFieldMap, policyMap, "")
+	//TODO : put check to not got do traverseAndRedact if policyMap is empty
+	data = traverseAndRedact(data["data"].(map[string]any), allFieldMap, policyMap, "")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	responseSuccess := map[string]any{
 		"status":   "success",
-		"data":     data["data"],
+		"data":     data,
 		"allfield": allFieldMap,
 		"message":  "Successfully parsed JSON",
 	}
@@ -112,14 +109,17 @@ func normalizeTypeName(name string) string {
 	return re.ReplaceAllString(name, "")
 }
 
-func traverseAndRedact(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]bool, typename string) map[string]interface{} {
+func traverseAndRedact(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]any, typename string) map[string]interface{} {
 	for key, value := range jsonMap {
 
 		if typename != "" {
 			normalizedType := normalizeTypeName(typename)
 
-			if policyMap[normalizedType] != nil && policyMap[normalizedType][key] {
-				delete(jsonMap, key)
+			if policyMap[normalizedType] != nil && policyMap[normalizedType][key] == true {
+				engineResponse := policyMap[normalizedType]["engineResonse"].(map[string]string)
+				if !processEngineResonse(normalizedType, engineResponse, jsonMap) {
+					delete(jsonMap, key)
+				}
 				continue
 			}
 		}
@@ -146,4 +146,50 @@ func respondWithError(w http.ResponseWriter, code int, message string) {
 		"status":  "error",
 		"message": message,
 	})
+}
+
+func getEngineResponseBasedOnPolicy(policy string) (map[string]string, error) {
+	permissions := map[string]map[string]string{
+		"Account.balance": {
+			"acc123": "ALLOW",
+			"acc456": "DENY",
+		},
+		"Card.cardNumber": {
+			"card123": "ALLOW",
+			"card456": "DENY",
+		},
+		"AvailableCreditAmount.availableSpendingCreditAmount": {
+			"acc123": "ALLOW",
+			"acc456": "DENY",
+		},
+	}
+
+	if val, ok := permissions[policy]; ok {
+		return val, nil
+	}
+	return nil, errors.New("no engine response found for policy: " + policy)
+}
+
+func processEngineResonse(normalizedTypeName string, engineResonse map[string]string, jsonMap map[string]interface{}) bool {
+	if normalizedTypeName == "Account" {
+		valueInEngineResponse := engineResonse[jsonMap["accountReferenceId"].(string)]
+		if valueInEngineResponse == "ALLOW" {
+			return true
+		} else if valueInEngineResponse == "DENY" {
+			return false
+		} else {
+			return false
+		}
+	}
+	if normalizedTypeName == "Card" {
+		valueInEngineResponse := engineResonse[jsonMap["cardReferenceId"].(string)]
+		if valueInEngineResponse == "ALLOW" {
+			return true
+		} else if valueInEngineResponse == "DENY" {
+			return false
+		} else {
+			return false
+		}
+	}
+	return false
 }
