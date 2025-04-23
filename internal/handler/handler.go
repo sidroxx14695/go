@@ -207,14 +207,42 @@ func processEngineResonse(engineResonse map[string]string, refids string) bool {
 	}
 }
 
+func findReferenceID(data map[string]interface{}) string {
+	for key, value := range data {
+		if key == "accountReferenceId" {
+			if str, ok := value.(string); ok {
+				return str
+			}
+		}
+		if nestedMap, ok := value.(map[string]interface{}); ok {
+			if ref := findReferenceID(nestedMap); ref != "" {
+				return ref
+			}
+		}
+		if array, ok := value.([]interface{}); ok {
+			for _, item := range array {
+				if itemMap, ok := item.(map[string]interface{}); ok {
+					if ref := findReferenceID(itemMap); ref != "" {
+						return ref
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]any, typename string, refid string) map[string]interface{} {
 	for key, value := range jsonMap {
 		if typename != "" {
 			normalizedType := normalizeTypeName(typename)
 			if normalizeTypeName(typename) == "Account" {
-				if refIdVal, ok := jsonMap["accountReferenceId"].(string); ok {
-					refid = refIdVal
+				if tempRefid := findReferenceID(jsonMap); tempRefid != "" {
+					refid = tempRefid
 				}
+				//if refIdVal, ok := jsonMap["accountReferenceId"].(string); ok {
+				//refid = refIdVal
+				//}
 			}
 			if normalizeTypeName(typename) == "Card" {
 				if refIdVal, ok := jsonMap["cardReferenceId"].(string); ok {
@@ -229,7 +257,8 @@ func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]s
 					var filtered []interface{}
 					for _, obj := range accounValue {
 						if m, ok := obj.(map[string]interface{}); ok {
-							refid, _ := m["accountReferenceId"].(string)
+							refid = findReferenceID(m)
+							//refid, _ := m["accountReferenceId"].(string)
 							if processEngineResonse(engineResponse, refid) {
 								filtered = append(filtered, m)
 							}
@@ -325,7 +354,9 @@ func ParseGraphQLQueryCopy(w http.ResponseWriter, r *http.Request) {
 		policyMap[typename][field] = true
 	}
 
-	data = traverseAndRedactCopy(data["data"].(map[string]any), allFieldMap, policyMap, "", "")
+	if len(policyMap) != 0 {
+		data = traverseAndRedactCopy(data["data"].(map[string]any), allFieldMap, policyMap, "", "")
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
