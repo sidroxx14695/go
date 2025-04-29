@@ -2,6 +2,7 @@ package utility
 
 import (
 	"os"
+	"regexp"
 
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -9,15 +10,21 @@ import (
 
 type FieldsMap map[string]string
 
-func ParseSchema() (FieldsMap, error) {
+type EntitlementIdMap map[string]string
+
+func ParseSchema() (FieldsMap, EntitlementIdMap, error) {
 	schemaFilePath := "../schema.graphql"
 	body, err := os.ReadFile(schemaFilePath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	doc, err := gqlparser.LoadSchema(&ast.Source{Input: string(body)})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	entitlementIdMap, err := ExtractEntitlementIdentifiers(string(body))
+	if err != nil {
+		return nil, nil, err
 	}
 
 	allFieldMap := make(FieldsMap)
@@ -32,5 +39,20 @@ func ParseSchema() (FieldsMap, error) {
 			}
 		}
 	}
-	return allFieldMap, nil
+	return allFieldMap, entitlementIdMap, nil
+}
+
+func ExtractEntitlementIdentifiers(schema string) (EntitlementIdMap, error) {
+	result := make(EntitlementIdMap)
+
+	regex := regexp.MustCompile(`key:\s*"(.*?)"(?:[^{}]|{[^{}]*})*?node:\s*{\s*entitlementIdentifier:\s*"(.*?)"`)
+
+	matches := regex.FindAllStringSubmatch(schema, -1)
+	for _, match := range matches {
+		key := match[1]
+		entitlementIdentifier := match[2]
+		result[key] = entitlementIdentifier
+	}
+
+	return result, nil
 }

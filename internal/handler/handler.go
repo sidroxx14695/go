@@ -34,7 +34,7 @@ func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allFieldMap, err := utility.ParseSchema()
+	allFieldMap, entitlementIdMap, err := utility.ParseSchema()
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error parsing schema: "+err.Error())
 		return
@@ -90,10 +90,11 @@ func ParseGraphQLQuery(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	responseSuccess := map[string]any{
-		"status":   "success",
-		"data":     data,
-		"allfield": allFieldMap,
-		"message":  "Successfully parsed JSON",
+		"status":           "success",
+		"data":             data,
+		"allfield":         allFieldMap,
+		"entitlementIdMap": entitlementIdMap,
+		"message":          "Successfully parsed JSON",
 	}
 	_ = json.NewEncoder(w).Encode(responseSuccess)
 }
@@ -207,22 +208,25 @@ func processEngineResonse(engineResonse map[string]string, refids string) bool {
 	}
 }
 
-func findReferenceID(data map[string]interface{}) string {
+func findReferenceID(data map[string]interface{}, refIdName string) string {
+	if refIdName == "" {
+		return ""
+	}
 	for key, value := range data {
-		if key == "accountReferenceId" {
+		if key == refIdName { //check if refName is not empty
 			if str, ok := value.(string); ok {
 				return str
 			}
 		}
 		if nestedMap, ok := value.(map[string]interface{}); ok {
-			if ref := findReferenceID(nestedMap); ref != "" {
+			if ref := findReferenceID(nestedMap, refIdName); ref != "" {
 				return ref
 			}
 		}
 		if array, ok := value.([]interface{}); ok {
 			for _, item := range array {
 				if itemMap, ok := item.(map[string]interface{}); ok {
-					if ref := findReferenceID(itemMap); ref != "" {
+					if ref := findReferenceID(itemMap, refIdName); ref != "" {
 						return ref
 					}
 				}
@@ -232,12 +236,12 @@ func findReferenceID(data map[string]interface{}) string {
 	return ""
 }
 
-func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]any, typename string, refid string) map[string]interface{} {
+func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]string, policyMap map[string]map[string]map[string]string, entitlementIdMap map[string]string, typename string, refid string) map[string]interface{} {
 	for key, value := range jsonMap {
 		if typename != "" {
 			normalizedType := normalizeTypeName(typename)
 			if normalizeTypeName(typename) == "Account" {
-				if tempRefid := findReferenceID(jsonMap); tempRefid != "" {
+				if tempRefid := findReferenceID(jsonMap, entitlementIdMap[normalizedType+"."+key]); tempRefid != "" {
 					refid = tempRefid
 				}
 				//if refIdVal, ok := jsonMap["accountReferenceId"].(string); ok {
@@ -249,37 +253,38 @@ func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]s
 					refid = refIdVal
 				}
 			}
-			if policyMap[normalizedType] != nil && policyMap[normalizedType][key] == true {
-				engineResponse := policyMap[normalizedType]["engineResonse"].(map[string]string)
-				fmt.Println(reflect.TypeOf(value))
-				switch accounValue := value.(type) {
-				case []interface{}:
-					var filtered []interface{}
-					for _, obj := range accounValue {
-						if m, ok := obj.(map[string]interface{}); ok {
-							refid = findReferenceID(m)
-							//refid, _ := m["accountReferenceId"].(string)
-							if processEngineResonse(engineResponse, refid) {
-								filtered = append(filtered, m)
+			if fieldsMap, exists := policyMap[normalizedType]; exists {
+				if engineResponse, fieldExists := fieldsMap[key]; fieldExists {
+					fmt.Println(reflect.TypeOf(value))
+					switch accounValue := value.(type) {
+					case []interface{}:
+						var filtered []interface{}
+						for _, obj := range accounValue {
+							if m, ok := obj.(map[string]interface{}); ok {
+								refid = findReferenceID(m, entitlementIdMap[normalizedType+"."+key])
+								//refid, _ := m["accountReferenceId"].(string)
+								if processEngineResonse(engineResponse, refid) {
+									filtered = append(filtered, m)
+								}
 							}
 						}
-					}
-					jsonMap[key] = filtered
-				case any:
-					if !processEngineResonse(engineResponse, refid) {
-						delete(jsonMap, key)
-						continue
+						jsonMap[key] = filtered
+					case any:
+						if !processEngineResonse(engineResponse, refid) {
+							delete(jsonMap, key)
+							continue
+						}
 					}
 				}
 			}
 		}
 		switch v := jsonMap[key].(type) {
 		case map[string]interface{}:
-			jsonMap[key] = traverseAndRedactCopy(v, fieldMap, policyMap, fieldMap[key], refid)
+			jsonMap[key] = traverseAndRedactCopy(v, fieldMap, policyMap, entitlementIdMap, fieldMap[key], refid)
 		case []interface{}:
 			for i, item := range v {
 				if obj, ok := item.(map[string]interface{}); ok {
-					v[i] = traverseAndRedactCopy(obj, fieldMap, policyMap, fieldMap[key], refid)
+					v[i] = traverseAndRedactCopy(obj, fieldMap, policyMap, entitlementIdMap, fieldMap[key], refid)
 				}
 			}
 			jsonMap[key] = v
@@ -307,7 +312,7 @@ func ParseGraphQLQueryCopy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	allFieldMap, err := utility.ParseSchema()
+	allFieldMap, entitlementIdMap, err := utility.ParseSchema()
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error parsing schema: "+err.Error())
 		return
@@ -325,7 +330,7 @@ func ParseGraphQLQueryCopy(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Error parsing JSON body: "+err.Error())
 		return
 	}
-	policyMap := make(map[string]map[string]any)
+	policyMap := make(map[string]map[string]map[string]string)
 	for _, policy := range policiesList {
 		parts := splitPoliciesAndRemoveSpace(policy, ".")
 		if len(parts) != 2 {
@@ -342,29 +347,31 @@ func ParseGraphQLQueryCopy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if policyMap[typename] == nil {
-			policyMap[typename] = make(map[string]any)
-		}
 		engineResponse, error := getEngineResponseBasedOnPolicy(policy)
 		if error != nil {
 			respondWithError(w, http.StatusBadRequest, "Error getting engine response: "+error.Error())
 			return
 		}
-		policyMap[typename]["engineResonse"] = engineResponse
-		policyMap[typename][field] = true
+
+		if _, ok := policyMap[typename]; !ok {
+			policyMap[typename] = make(map[string]map[string]string)
+		}
+
+		policyMap[typename][field] = engineResponse
 	}
 
 	if len(policyMap) != 0 {
-		data = traverseAndRedactCopy(data["data"].(map[string]any), allFieldMap, policyMap, "", "")
+		data = traverseAndRedactCopy(data["data"].(map[string]any), allFieldMap, policyMap, entitlementIdMap, "", "")
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	responseSuccess := map[string]any{
-		"status":   "success",
-		"data":     data,
-		"allfield": allFieldMap,
-		"message":  "Successfully parsed JSON",
+		"status":           "success",
+		"data":             data,
+		"allfield":         allFieldMap,
+		"entitlementIdMap": entitlementIdMap,
+		"message":          "Successfully parsed JSON",
 	}
 	_ = json.NewEncoder(w).Encode(responseSuccess)
 }
