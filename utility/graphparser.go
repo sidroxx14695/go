@@ -3,6 +3,7 @@ package utility
 import (
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -11,6 +12,8 @@ import (
 type FieldsMap map[string]string
 
 type EntitlementIdMap map[string]string
+
+var parsedSchema *ast.Schema // global cache to be reused if needed
 
 func ParseSchema() (FieldsMap, EntitlementIdMap, error) {
 	schemaFilePath := "../schema.graphql"
@@ -22,6 +25,9 @@ func ParseSchema() (FieldsMap, EntitlementIdMap, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+
+	parsedSchema = doc
+
 	entitlementIdMap, err := ExtractEntitlementIdentifiers(string(body))
 	if err != nil {
 		return nil, nil, err
@@ -55,4 +61,32 @@ func ExtractEntitlementIdentifiers(schema string) (EntitlementIdMap, error) {
 	}
 
 	return result, nil
+}
+
+func ResolveRefIdNameFallback(policyKey string, entitlementIdMap EntitlementIdMap) string {
+	// Priority 1: check entitlementIdMap
+	if ref, ok := entitlementIdMap[policyKey]; ok && ref != "" {
+		return ref
+	}
+
+	// Priority 2: check @key directive in parsedSchema
+	parts := strings.Split(policyKey, ".")
+	if len(parts) != 2 || parsedSchema == nil {
+		return ""
+	}
+	typename := parts[0]
+
+	if typeDef, ok := parsedSchema.Types[typename]; ok {
+		for _, dir := range typeDef.Directives {
+			if dir.Name == "key" {
+				for _, arg := range dir.Arguments {
+					if arg.Name == "fields" {
+						return arg.Value.Raw
+					}
+				}
+			}
+		}
+	}
+
+	return ""
 }

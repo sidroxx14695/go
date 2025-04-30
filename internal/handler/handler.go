@@ -241,7 +241,8 @@ func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]s
 		if typename != "" {
 			normalizedType := normalizeTypeName(typename)
 			if normalizeTypeName(typename) == "Account" {
-				if tempRefid := findReferenceID(jsonMap, entitlementIdMap[normalizedType+"."+key]); tempRefid != "" {
+				refIdField := utility.ResolveRefIdNameFallback(normalizedType+"."+key, entitlementIdMap)
+				if tempRefid := findReferenceID(jsonMap, refIdField); tempRefid != "" {
 					refid = tempRefid
 				}
 				//if refIdVal, ok := jsonMap["accountReferenceId"].(string); ok {
@@ -261,7 +262,8 @@ func traverseAndRedactCopy(jsonMap map[string]interface{}, fieldMap map[string]s
 						var filtered []interface{}
 						for _, obj := range accounValue {
 							if m, ok := obj.(map[string]interface{}); ok {
-								refid = findReferenceID(m, entitlementIdMap[normalizedType+"."+key])
+								refIdField := utility.ResolveRefIdNameFallback(normalizedType+"."+key, entitlementIdMap)
+								refid = findReferenceID(m, refIdField)
 								//refid, _ := m["accountReferenceId"].(string)
 								if processEngineResonse(engineResponse, refid) {
 									filtered = append(filtered, m)
